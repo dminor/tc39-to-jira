@@ -1,8 +1,12 @@
 import fetch from "node-fetch";
 import fs from "node:fs/promises";
+import https from "node:https";
 import { Command } from "commander";
 
-const COMPONENT = "TC39 Proposals";
+const PROJECTKEY = "SJP";
+const COMPONENT = "TC39 Proposals"
+const USER = "dminor";
+const ISSUETYPE_STORY = 10030;
 
 const STAGE_EPICS = {
   "1": "SJP-184",
@@ -36,6 +40,113 @@ async function parseJiraCsv(filename) {
   handle.close();
 }
 
+async function createIssue(apiToken, name, description, stage) {
+  const createBlob = JSON.stringify({
+    "fields": {
+      "project": {
+        "key": PROJECTKEY,
+      },
+      "parent": {
+        "key": STAGE_EPICS[stage]
+      },
+      "summary": name,
+      "issuetype": {
+        "id": ISSUETYPE_STORY,
+      },
+      "description": description,
+      "components": [{"name": COMPONENT}],
+    }
+  });
+
+  const options = {
+    host: "mozilla-hub.atlassian.net",
+    path: "/rest/api/2/issue/",
+    method: "POST",
+    headers: {
+       "Authorization": "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
+       "Content-Type": "application/json",
+       "Content-Length":`${createBlob.length}`,
+    }
+  };
+
+  let request = new Promise((resolve, reject) => {
+    let data = '';
+    let req = https.request(options, res => {
+      res.on("data", (chunk) => data += chunk);
+      res.on("error", (err) => {
+        console.log(`error: could not create ${name}: `, err);
+        reject(err);
+      });
+      res.on("end", () => {
+        resolve(JSON.parse(data));
+      });
+    });
+
+    req.on("error", (err) => {
+      console.log(`error: could not create ${name}: `, err);
+      reject(err);
+    });
+
+    req.write(createBlob);
+    req.end();
+  });
+
+  const response = await request;
+  if (response.key !== undefined) {
+    console.log(`Created issue for ${name} with key: ${response.key}`);
+  } else {
+    console.log(`Error creating issue for ${name}: ${JSON.stringify(response.errors)}`);
+  }
+}
+
+async function updateIssue(apiToken, issueKey, description, stage) {
+  const updateBlob = JSON.stringify({
+    "fields": {
+      "parent": {
+        "key": STAGE_EPICS[stage]
+      },
+    },
+    "update": {
+      "description":[
+        {"set": description}
+      ]
+    }
+  });
+
+  const options = {
+    host: "mozilla-hub.atlassian.net",
+    path: `/rest/api/2/issue/${issueKey}`,
+    method: "PUT",
+    headers: {
+       "Authorization": "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
+       "Content-Type": "application/json",
+       "Content-Length":`${updateBlob.length}`,
+    }
+  };
+
+  let request = new Promise((resolve, reject) => {
+    let req = https.request(options, res => {
+      resolve(res.statusCode);
+      res.on("data", () => {});
+    });
+
+    req.on("error", (err) => {
+      console.log(`error: could not update ${issueKey}: `, err);
+      reject(err);
+    });
+
+    req.write(updateBlob);
+    req.end();
+  });
+
+  const statusCode = await request;
+  if (statusCode === 204) {
+    console.log(`Successfully updated ${issueKey}: `, statusCode);
+  } else {
+    console.log(`Error: could not update ${issueKey}: `, statusCode);
+  }
+}
+
 async function parseTC39Dataset(filename) {
   let data;
   if (filename === true) {
@@ -47,12 +158,13 @@ async function parseTC39Dataset(filename) {
     handle.close();
   }
 
-  let handle = await fs.open("keys.json", "r");
-  let issueKeys = JSON.parse(await handle.readFile());
+  var handle = await fs.open("apitoken", "r");
+  const apiToken = await handle.readFile();
   handle.close();
 
-  handle = await fs.open("proposals.csv", "w");
-  await handle.write("Issue Key, Summary, Description, Component, Parent\n");
+  handle = await fs.open("keys.json", "r");
+  let issueKeys = JSON.parse(await handle.readFile());
+  handle.close();
 
   const DTF = new Intl.DateTimeFormat("en-CA", {dateStyle: "short"});
 
@@ -72,11 +184,6 @@ async function parseTC39Dataset(filename) {
       }
 
       let issueKey = issueKeys[proposal.id];
-      if (issueKey === undefined) {
-        // We'll map this to the empty string, Jira will create a new issue.
-        issueKey = "";
-        console.log("Warning: found new proposal with id: " + proposal.id);
-      }
 
       let notes = [];
       for (let idx in proposal.notes) {
@@ -92,10 +199,13 @@ async function parseTC39Dataset(filename) {
         noteString += `  - ${DTF.format(note.date)}: ${note.url}\n`
       }
       let description = `id: ${proposal.id}\nurl: ${proposal.url}\n${noteString}`;
-      await handle.write(`"${issueKey}", "${proposal.name}", "${description}", "${COMPONENT}", "${STAGE_EPICS[proposal.stage]}"\n`);
+      if (issueKey === undefined) {
+        await createIssue(apiToken, proposal.name, description, proposal.stage);
+      } else {
+        await updateIssue(apiToken, issueKey, description, proposal.stage);
+      }
     }
   }
-  handle.close();
 }
 
 const program = new Command();
