@@ -1,7 +1,7 @@
-import fetch from "node-fetch";
+
 import fs from "node:fs/promises";
 import https from "node:https";
-import { Command } from "commander";
+import process from "node:process";
 
 const PROJECTKEY = "SJP";
 const COMPONENT = "TC39 Proposals"
@@ -16,28 +16,50 @@ const STAGE_EPICS = {
   "4": "SJP-188"
 };
 
-// This function will parse an exported csv file from Jira to create a
-// mapping between the JIRA key and the TC39 dataset id. This can be
-// used to update existing JIRA issues with changes from the dataset.
-async function parseJiraCsv(filename) {
-  let handle = await fs.open(filename, "r");
-  let mapping = {};
-  for await (const line of handle.readLines()) {
-    let key = line.match(/(SJP\-[0-9]+)/);
-    if (key === null) {
-      continue;
-    }
-    let id = line.match(/id: ([A-Za-z0-9.-]+)/);
-    if (id === null || id[1] == "undefined") {
-      continue;
-    }
-    mapping[id[1]] = key[1];
-  }
-  handle.close();
+async function getIssues(apiToken) {
+  let mapping = new Map();
+  let startAt = 0;
+  let totalResults = 1;
+  while (startAt < totalResults) {
+    const maxResults = 100;
+    const queryBlob = JSON.stringify({
+      "expand": [],
+      "fields": [
+        "description",
+      ],
+      "jql": `project = "${PROJECTKEY}" and component = "${COMPONENT}"`,
+      "maxResults": maxResults,
+      "startAt": startAt
+    });
 
-  handle = await fs.open("keys.json", "w");
-  handle.write(JSON.stringify(mapping));
-  handle.close();
+    let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/2/search", {
+      method: 'POST',
+      headers: {
+        'Authorization': "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: queryBlob
+    });
+    if (response.status == 200) {
+      const data = await response.json();
+      totalResults = data.total;
+      startAt += maxResults;
+      for (const issue of data.issues) {
+        if (issue.fields.description) {
+          let id = issue.fields.description.match(/id: ([A-Za-z0-9.-]+)/);
+          if (id === null || id[1] == "undefined") {
+            continue;
+          }
+          mapping.set(id[1], issue.key);
+        }
+      }
+    } else {
+      console.log(`Error: Could not query issues: status: ${response.status} text: ${response.text}`);
+      return;
+    }
+  }
+  return mapping;
 }
 
 async function createIssue(apiToken, name, description, stage) {
@@ -113,7 +135,7 @@ async function updateIssue(apiToken, issueKey, description, stage) {
 
 async function parseTC39Dataset(filename) {
   let data;
-  if (filename === true) {
+  if (filename === undefined) {
     const response = await fetch("https://tc39.es/dataset/proposals.json");
     data = await response.json();
   } else {
@@ -126,9 +148,7 @@ async function parseTC39Dataset(filename) {
   const apiToken = await handle.readFile();
   handle.close();
 
-  handle = await fs.open("keys.json", "r");
-  let issueKeys = JSON.parse(await handle.readFile());
-  handle.close();
+  let issueKeys = await getIssues(apiToken);
 
   const DTF = new Intl.DateTimeFormat("en-CA", {dateStyle: "short"});
 
@@ -147,7 +167,7 @@ async function parseTC39Dataset(filename) {
         continue;
       }
 
-      let issueKey = issueKeys[proposal.id];
+      let issueKey = issueKeys.get(proposal.id);
 
       let notes = [];
       for (let idx in proposal.notes) {
@@ -172,15 +192,4 @@ async function parseTC39Dataset(filename) {
   }
 }
 
-const program = new Command();
-program
-  .option('--parse-jira-csv [filename]')
-  .option('--parse-tc39-dataset [filename]');
-program.parse();
-const options = program.opts();
-
-if (options.parseJiraCsv) {
-  parseJiraCsv(options.parseJiraCsv === true ? "Jira.csv" : options.parseJiraCsv);
-} else if (options.parseTc39Dataset) {
-  parseTC39Dataset(options.parseTc39Dataset);
-}
+parseTC39Dataset(process.argv[2]);

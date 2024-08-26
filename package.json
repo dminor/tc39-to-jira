@@ -10,7 +10,5 @@
   "author": "",
   "license": "BSD-2-Clause",
   "dependencies": {
-    "commander": "^12.1.0",
-    "node-fetch": "^3.3.2"
   }
 }
