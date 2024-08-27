@@ -58,7 +58,7 @@ async function createIssue(apiToken, name, description, stage) {
     }
   });
 
-  const options = {
+  let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/2/search", {
     host: "mozilla-hub.atlassian.net",
     path: "/rest/api/2/issue/",
     method: "POST",
@@ -66,36 +66,16 @@ async function createIssue(apiToken, name, description, stage) {
        "Authorization": "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
        "Content-Type": "application/json",
        "Content-Length":`${createBlob.length}`,
-    }
-  };
-
-  let request = new Promise((resolve, reject) => {
-    let data = '';
-    let req = https.request(options, res => {
-      res.on("data", (chunk) => data += chunk);
-      res.on("error", (err) => {
-        console.log(`error: could not create ${name}: `, err);
-        reject(err);
-      });
-      res.on("end", () => {
-        resolve(JSON.parse(data));
-      });
-    });
-
-    req.on("error", (err) => {
-      console.log(`error: could not create ${name}: `, err);
-      reject(err);
-    });
-
-    req.write(createBlob);
-    req.end();
+    },
+    body: createBlob
   });
 
-  const response = await request;
-  if (response.key !== undefined) {
-    console.log(`Created issue for ${name} with key: ${response.key}`);
+  if (response.status == 200) {
+    const data = await response.json();
+    console.log(`Created issue for ${name} with key: ${data.key}`);
   } else {
-    console.log(`Error creating issue for ${name}: ${JSON.stringify(response.errors)}`);
+    const data = await response.json();
+    console.log(`Error creating issue for ${name}: ${JSON.stringify(data.errors)}`);
   }
 }
 
@@ -113,37 +93,21 @@ async function updateIssue(apiToken, issueKey, description, stage) {
     }
   });
 
-  const options = {
-    host: "mozilla-hub.atlassian.net",
-    path: `/rest/api/2/issue/${issueKey}`,
-    method: "PUT",
+  let response = await fetch(`https://mozilla-hub.atlassian.net/rest/api/2/issue/${issueKey}`, {
+    method: 'PUT',
     headers: {
-       "Authorization": "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
-       "Content-Type": "application/json",
-       "Content-Length":`${updateBlob.length}`,
-    }
-  };
-
-  let request = new Promise((resolve, reject) => {
-    let req = https.request(options, res => {
-      resolve(res.statusCode);
-      res.on("data", () => {});
-    });
-
-    req.on("error", (err) => {
-      console.log(`error: could not update ${issueKey}: `, err);
-      reject(err);
-    });
-
-    req.write(updateBlob);
-    req.end();
+      'Authorization': "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
+      'Accept': 'application/json',
+      "Content-Type": "application/json",
+      "Content-Length":`${updateBlob.length}`,
+    },
+    body: updateBlob
   });
 
-  const statusCode = await request;
-  if (statusCode === 204) {
-    console.log(`Successfully updated ${issueKey}: `, statusCode);
+  if (response.status == 204) {
+    console.log(`Successfully updated ${issueKey}: `, response.statusText);
   } else {
-    console.log(`Error: could not update ${issueKey}: `, statusCode);
+    console.log(`Error: could not update ${issueKey}: `, response.statusText);
   }
 }
 
