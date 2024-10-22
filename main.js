@@ -1,6 +1,5 @@
 
 import fs from "node:fs/promises";
-import https from "node:https";
 import process from "node:process";
 
 const PROJECTKEY = "SJP";
@@ -80,9 +79,7 @@ async function createIssue(apiToken, name, description, stage) {
     }
   });
 
-  let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/2/search", {
-    host: "mozilla-hub.atlassian.net",
-    path: "/rest/api/2/issue/",
+  let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/2/issue", {
     method: "POST",
     headers: {
        "Authorization": "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
@@ -92,12 +89,12 @@ async function createIssue(apiToken, name, description, stage) {
     body: createBlob
   });
 
-  if (response.status == 200) {
+  if (response.status == 201) {
     const data = await response.json();
     console.log(`Created issue for ${name} with key: ${data.key}`);
   } else {
     const data = await response.json();
-    console.log(`Error creating issue for ${name}: ${JSON.stringify(data.errors)}`);
+    console.log(`Error creating issue for ${name}: ${response.status}: ${JSON.stringify(data.errors)}`);
   }
 }
 
