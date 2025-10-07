@@ -15,23 +15,39 @@ const STAGE_EPICS = {
   "4": "SJP-188"
 };
 
+function flattenDescription(description) {
+  let result = "";
+  for (const content of description.content) {
+    if (content.type == "paragraph") {
+      for (const elem of content.content) {
+        if (elem.type == "text") {
+          result += elem.text;
+        } else if (elem.type == "hardBreak") {
+          result += "\n";
+        }
+      }
+      result += "\n";
+    }
+  }
+  return result;
+}
+
 async function getIssues(apiToken) {
   let mapping = new Map();
-  let startAt = 0;
-  let totalResults = 1;
-  while (startAt < totalResults) {
+  let nextPageToken = null;
+  while (true) {
     const maxResults = 100;
     const queryBlob = JSON.stringify({
-      "expand": [],
+      "expand": "",
       "fields": [
         "description",
       ],
       "jql": `project = "${PROJECTKEY}" and component = "${COMPONENT}"`,
       "maxResults": maxResults,
-      "startAt": startAt
+      "nextPageToken": nextPageToken,
     });
 
-    let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/2/search", {
+    let response = await fetch("https://mozilla-hub.atlassian.net/rest/api/3/search/jql", {
       method: 'POST',
       headers: {
         'Authorization': "Basic " + new Buffer.from(`${USER}@mozilla.com:${apiToken}`).toString('base64'),
@@ -42,16 +58,19 @@ async function getIssues(apiToken) {
     });
     if (response.status == 200) {
       const data = await response.json();
-      totalResults = data.total;
-      startAt += maxResults;
       for (const issue of data.issues) {
         if (issue.fields.description) {
-          let id = issue.fields.description.match(/id: ([A-Za-z0-9.-]+)/);
+          const description = flattenDescription(issue.fields.description);
+          let id = description.match(/id: ([A-Za-z0-9.-]+)/);
           if (id === null || id[1] == "undefined") {
             continue;
           }
           mapping.set(id[1], issue.key);
         }
+      }
+      nextPageToken = data.nextPageToken;
+      if (data.isLast) {
+        break;
       }
     } else {
       console.log(`Error: Could not query issues: status: ${response.status} text: ${response.text}`);
