@@ -1,4 +1,4 @@
-Script to extract data from tc39 dataset for use in jira.
+Script to extract data from [tc39 dataset](https://github.com/tc39/dataset) for use in jira.
 
 How to use
 ----------
