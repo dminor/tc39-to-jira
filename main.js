@@ -73,8 +73,9 @@ async function getIssues(apiToken) {
         break;
       }
     } else {
-      console.log(`Error: Could not query issues: status: ${response.status} text: ${response.text}`);
-      return;
+      const text = await response.text();
+      console.log(`Error: Could not query issues: status: ${response.status} text: ${text}`);
+      return mapping;
     }
   }
   return mapping;
@@ -161,10 +162,14 @@ async function parseTC39Dataset(filename) {
   }
 
   var handle = await fs.open("apitoken", "r");
-  const apiToken = await handle.readFile();
+  const apiToken = (await handle.readFile()).toString().trim();
   handle.close();
 
   let issueKeys = await getIssues(apiToken);
+  if (issueKeys.size == 0) {
+    console.log("Error: no issue keys, can't continue\n");
+    return;
+  }
 
   const DTF = new Intl.DateTimeFormat("en-CA", {dateStyle: "short"});
 
